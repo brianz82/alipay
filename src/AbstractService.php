@@ -101,17 +101,35 @@ abstract class AbstractService
      * Refund for a trade
      *
      * @param string $tradeNo     the trade#
-     * @param float $fee          how much money to refund
-     * @param string $reason      the reason why we need refund
+     * @param float $fee          total amount of money to refund
+     * @param string $reason      reason
+     * @param array $options      options
+     *                            - sub           sub trade
+     *                                - fee
+     *                                - reason
+     *                            - profit
+     *
      * @return \stdClass          result of this refund. with following fields set:
      *                            - status 'REFUND_SUCCESS' for success,
      *                                     'REFUND_FAILED' for failure,
      *                                     'REFUND_PENDING' for pending(where an asynchronous notification will be sent)
      *                            - msg    When status equals 'F', this field gives out the reason why it failed
      *                            - seqNo  sequence# for this refund
+     *
+     * @throws \IllegalArgumentException
      */
-    public function refundTrade($tradeNo, $fee, $reason = '协商退款')
+    public function refundTrade($tradeNo, $fee, $reason = '协商退款', array $options = [])
     {
+        if (($batchNum = array_get($options, 'batch_num', 1)) > 1000) {
+            throw new \IllegalArgumentException('退款总笔数不能超过1000笔');
+        }
+
+        if (!($batchNo = array_get($options, 'batch_no'))) {
+            $batchNo = $this->genRefundTradeSeqNo($tradeNo);
+        }
+
+        $detail = $this->formatRefundTradeDetail($tradeNo,  $fee, $reason, $options);
+
         // NOTE: the following $params are sorted manually (to save some CPU)
         //       If a new key needs adding, do not break this rule. Otherwise,
         //       to fix it up you should call:
@@ -120,9 +138,9 @@ abstract class AbstractService
         //
         $params = [
             '_input_charset' => 'utf-8',
-            'batch_no'       => $this->genRefundTradeSeqNo($tradeNo),
-            'batch_num'      => '1',   // we only support one transaction in a batch
-            'detail_data'    => $tradeNo. '^' . $fee . '^' . $reason,
+            'batch_no'       => $batchNo,
+            'batch_num'      => $batchNum,
+            'detail_data'    => $detail,
             'notify_url'     => $this->refundNotifyUrl,
             'partner'        => $this->partner,
             'refund_date'    => date('Y-m-d H:i:s'),
@@ -138,6 +156,50 @@ abstract class AbstractService
                                                // asynchronous notification is received
     
         return $result;
+    }
+
+    private function formatRefundTradeDetail($tradeNo, $fee, $reason, array $options = [])
+    {
+        // detail of refund can contain several parts
+        //
+        // the first and mandatory part is 交易退款数据 for the whole refund, whose format is
+        //    原付款支付宝交易号^退款总金额^退款理由
+        $detail = implode('^', [$tradeNo, $fee, $reason]);
+
+        //
+        // optionally, refund for profit sharing(分润) can appear
+        //
+        if (($profitRefunds = array_get($options, 'profit'))) {
+            foreach ($profitRefunds as $profitRefund) {
+                $detail .= '|' . $this->formatRefundProfitItem($profitRefund, $reason);
+            }
+        }
+
+        //
+        // the last part (also optional) is 子交易退款数据, whose format is
+        //    金额^退款理由
+        //
+        if (($subTradeRefund = array_get($options, 'sub'))) {
+            $detail .= '$$' . implode('^', [
+                array_get($subTradeRefund, 'fee'),
+                array_get($subTradeRefund, 'reason', $reason)
+            ]);
+        }
+
+        return $detail;
+    }
+
+    private function formatRefundProfitItem(array $profitRefund, $defaultReason)
+    {
+        //
+        // 分润退款数据格式: 转出人支付宝账号[原收到分润金额的账户]^转出人支付宝账号对应用户ID[2088开头16位纯数字]^
+        //                转入人支付宝账号[原付出分润金额的账户]^转入人支付宝账号对应用户ID^
+        //                退款金额^退款理由。
+        if (count($profitRefund) == 5) { // reason is missing
+            $profitRefund[] = $defaultReason;
+        }
+
+        return implode('^', $profitRefund);
     }
     
     private function postRefundRequestAndParse($params)
