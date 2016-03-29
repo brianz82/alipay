@@ -1,0 +1,5 @@
+suites:
+    main:
+        namespace: Homer\Payment\Alipay
+        psr4_prefix: Homer\Payment\Alipay
+        src_path: src

@@ -1,0 +1,1 @@
+partner=2088101000137799&req_id=1282889689836&res_data=%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22utf-8%22%3F%3E%3Cdirect_trade_create_res%3E%3Crequest_token%3E20100830e8085e3e0868a466b822350ede5886e8%3C%2Frequest_token%3E%3C%2Fdirect_trade_create_res%3E&sec_id=MD5&service=alipay.wap.trade.create.direct&v=2.0&sign=05c3e3e90ed555404487c1d16b730f77

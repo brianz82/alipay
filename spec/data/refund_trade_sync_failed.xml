@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<alipay>
+	<is_success>F</is_success>
+	<error>BATCH_NO_FORMAT_ERROR</error>
+</alipay>
