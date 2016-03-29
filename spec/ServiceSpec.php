@@ -8,7 +8,7 @@ use GuzzleHttp\Psr7\Response;
 
 class ServiceSpec extends ObjectBehavior
 {
-    function let(ClientInterface $httpClient)
+    function let(ClientInterface $client)
     {
         $config = [
             'partner'            => '2088701892019087',
@@ -20,7 +20,7 @@ class ServiceSpec extends ObjectBehavior
             'secure_key'         => 'cwygc4fpvwevu45m2jnh43w54vir9eqw',
         ];
 
-        $this->beAnInstanceOf(\Homer\Payment\Alipay\Service::class, [$config, $httpClient]);
+        $this->beAnInstanceOf(\Homer\Payment\Alipay\Service::class, [$config, $client]);
     }
 
     //================================
@@ -81,10 +81,25 @@ class ServiceSpec extends ObjectBehavior
     //================================
     //        refundTrade
     //================================
-    function it_can_successfully_refund(ClientInterface $httpClient)
+    function it_can_successfully_refund(ClientInterface $client)
     {
-        $httpClient->request('POST', 'https://mapi.alipay.com/gateway.do', Argument::cetera())
-            ->willReturn(new Response(200, [], file_get_contents(__DIR__.'/data/refund_trade_sync_success.xml')));
+        $client->request('POST', 'https://mapi.alipay.com/gateway.do', Argument::that(function ($param) {
+            if (!array_key_exists('form_params', $param)) {
+                return false;
+            }
+
+            $params = $param['form_params'];
+            assert_equals('utf-8', $params['_input_charset']);
+            assert_equals('refund_fastpay_by_platform_nopwd', $params['service']);
+            assert_equals(1, $params['batch_num']);
+            assert_equals('TRADE#^100^协商退款', $params['detail_data']);
+            if (!array_key_exists('batch_no', $params)) {
+                return false;
+            }
+
+            return true;
+        }))->shouldBeCalledTimes(1)
+           ->willReturn(new Response(200, [], file_get_contents(__DIR__.'/data/refund_trade_sync_success.xml')));
 
         $result = $this->refundTrade('TRADE#', 100)->getWrappedObject();
         assert_equals('REFUND_SUCCESS', $result->status);
@@ -92,9 +107,74 @@ class ServiceSpec extends ObjectBehavior
         assert_not_empty($result->seqNo);
     }
 
-    function it_fails_to_refund_on_bad_batch_no(ClientInterface $httpClient)
+    function it_refunds_trade_with_sub_trade(ClientInterface $client)
     {
-        $httpClient->request('POST', 'https://mapi.alipay.com/gateway.do', Argument::cetera())
+        $client->request('POST', 'https://mapi.alipay.com/gateway.do', Argument::that(function ($param) {
+            if (!array_key_exists('form_params', $param)) {
+                return false;
+            }
+
+            $params = $param['form_params'];
+            assert_equals(1, $params['batch_num']);
+            assert_equals('TRADE#^100^协商退款$$20^协商退款', $params['detail_data']);
+
+            return true;
+        }))->shouldBeCalledTimes(1)
+            ->willReturn(new Response(200, [], file_get_contents(__DIR__.'/data/refund_trade_sync_success.xml')));
+
+        $this->shouldNotThrow()->duringRefundTrade('TRADE#', 100, '协商退款', [
+            'sub' => 20, // or 'sub' => [ 20 ], or 'sub' => [ 20, 'some reason' ]
+        ]);
+    }
+
+    function it_refunds_trade_with_shared_profit(ClientInterface $client)
+    {
+        $client->request('POST', 'https://mapi.alipay.com/gateway.do', Argument::that(function ($param) {
+            if (!array_key_exists('form_params', $param)) {
+                return false;
+            }
+
+            $params = $param['form_params'];
+            assert_equals(1, $params['batch_num']);
+            assert_equals('TRADE#^100^协商退款|from^2088701892019087^to^2088701892019088^30^协商退款', $params['detail_data']);
+
+            return true;
+        }))->shouldBeCalledTimes(1)
+            ->willReturn(new Response(200, [], file_get_contents(__DIR__.'/data/refund_trade_sync_success.xml')));
+
+        $this->shouldNotThrow()->duringRefundTrade('TRADE#', 100, '协商退款', [
+            'profit' => [
+                ['from', '2088701892019087', 'to', '2088701892019088', 30]
+            ]
+        ]);
+    }
+
+    function it_refunds_trade_with_shared_profit_and_sub_trade(ClientInterface $client)
+    {
+        $client->request('POST', 'https://mapi.alipay.com/gateway.do', Argument::that(function ($param) {
+            if (!array_key_exists('form_params', $param)) {
+                return false;
+            }
+
+            $params = $param['form_params'];
+            assert_equals(1, $params['batch_num']);
+            assert_equals('TRADE#^100^协商退款|from^2088701892019087^to^2088701892019088^30^协商退款$$20^协商退款', $params['detail_data']);
+
+            return true;
+        }))->shouldBeCalledTimes(1)
+            ->willReturn(new Response(200, [], file_get_contents(__DIR__.'/data/refund_trade_sync_success.xml')));
+
+        $this->shouldNotThrow()->duringRefundTrade('TRADE#', 100, '协商退款', [
+            'sub'    => 20,
+            'profit' => [
+                ['from', '2088701892019087', 'to', '2088701892019088', 30]
+            ]
+        ]);
+    }
+
+    function it_fails_to_refund_on_bad_batch_no(ClientInterface $client)
+    {
+        $client->request('POST', 'https://mapi.alipay.com/gateway.do', Argument::cetera())
             ->willReturn(new Response(200, [], file_get_contents(__DIR__.'/data/refund_trade_sync_failed.xml')));
 
         $result = $this->refundTrade('TRADE#', 100)->getWrappedObject();
@@ -139,7 +219,7 @@ class ServiceSpec extends ObjectBehavior
             $detail = $trade->details[0];
             assert_equals('2010031206252779', $detail->tradeNo);
             assert_equals(10.00, $detail->fee, '', 1E-6);
-            assert_equals('REFUND_SUCCESS', $detail->status);  // SUCESS shoulde be converted to REFUND_SUCCESS
+            assert_equals('REFUND_SUCCESS', $detail->status);  // SUCCESS should be converted to REFUND_SUCCESS
 
             return true;
         });

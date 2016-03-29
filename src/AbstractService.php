@@ -8,7 +8,11 @@ use GuzzleHttp\RequestOptions;
 use Homer\Payment\Alipay\Encrypt\OpensslEncryptor;
 
 /**
- * base class for alipay service
+ *
+ * base class for alipay service with two common features provided.
+ * 1). Support one and multiple trades refunding
+ * 2). Notification on trade status change is handled
+ *
  */
 abstract class AbstractService
 {
@@ -170,9 +174,9 @@ abstract class AbstractService
      * @param float $fee          total amount of money to refund
      * @param string $reason      reason
      * @param array $options      options
-     *                            - sub    sub trade
-     *                                - fee        fee to refund for this sub trade
-     *                                - reason     reason why refunding this sub trade
+     *                            - sub    (array|number) sub trade
+     *                                - [0]     fee to refund for this sub trade
+     *                                - [1]     (optional) reason why refunding this sub trade
      *                            - profit       (array) for shared profit refund. each element in this array is
      *                                           another array, and in turn each element complies with this format:
      *                                           [ 转出人支付宝账号/原收到分润金额的账户,
@@ -224,10 +228,7 @@ abstract class AbstractService
         //    金额^退款理由
         //
         if (($subTradeRefund = array_get($options, 'sub'))) {
-            $detail .= '$$' . implode('^', [
-                array_get($subTradeRefund, 'fee'),
-                array_get($subTradeRefund, 'reason', $reason)
-            ]);
+            $detail .= '$$' . implode('^', $this->extractSubTradeFeeAndReason($subTradeRefund, $reason));
         }
 
         return $detail;
@@ -244,6 +245,21 @@ abstract class AbstractService
         }
 
         return implode('^', $profitRefund);
+    }
+
+    private function extractSubTradeFeeAndReason($subTradeRefund, $defaultReason) {
+        if (is_numeric($subTradeRefund)) {
+            return [ $subTradeRefund, $defaultReason ];
+        }
+
+        if (is_array($subTradeRefund)) {
+            return [
+                $subTradeRefund[0],
+                count($subTradeRefund) > 1 ? $subTradeRefund[1] : $defaultReason
+            ];
+        }
+
+        throw new \IllegalArgumentException('too bad');
     }
     
     private function postRefundRequestAndParse($params)

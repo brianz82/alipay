@@ -6,12 +6,17 @@ if (!function_exists('assert_equals')) {
      * @param mixed $expected
      * @param mixed $actual
      * @param string $message
+     * @param float $delta
      *
      * @throws Exception        if the two objects not equal
      */
-    function assert_equals($expected, $actual, $message = null)
+    function assert_equals($expected, $actual, $message = null, $delta = 0.0)
     {
-        if ($expected != $actual) {
+        if ($expected == $actual) {
+            return;
+        }
+
+        if (abs($expected - $actual) > $delta) {
             throw new \Exception($message ?: sprintf('expected %s, but got %s', $expected, $actual));
         }
     }
