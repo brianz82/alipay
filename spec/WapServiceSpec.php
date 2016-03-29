@@ -8,29 +8,29 @@ use GuzzleHttp\Psr7\Response;
 
 class WapServiceSpec extends ObjectBehavior
 {
-    function let(ClientInterface $httpClient)
+    function let(ClientInterface $client)
     {
         $config = [
             'partner'           => '2088701892019087',
             'cert_file'         => __DIR__ . '/data/rsa_private_key.pem',
             'ali_cert_file'     => __DIR__ . '/data/alipay_wap_cert.pem',
             'notify_url'        => 'http://localhost/trade.php',
-            'seller'            => 'alipay@zero2all.com',
+            'seller'            => 'alipay@homer.com',
             'refund_notify_url' => 'http://localhost/refund.php',
             'secure_key'        => 'cwygc4fpvwevu45m2jnh43w54vir9eqw',
             'success_url'       => 'http://localhost/payment_success.php',
             'abort_url'         => 'http://localhost/payment_abort.php',
         ];
 
-        $this->beAnInstanceOf(\Homer\Payment\Alipay\WapService::class, [$config, $httpClient]);
+        $this->beAnInstanceOf(\Homer\Payment\Alipay\WapService::class, [$config, $client]);
     }
 
     //================================
     //        prepareTrade
     //================================
-    function it_prepares_trade_well(ClientInterface $httpClient)
+    function it_prepares_trade_well(ClientInterface $client)
     {
-        $httpClient->request('POST', 'http://wappaygw.alipay.com/service/rest.htm', Argument::cetera())
+        $client->request('POST', 'http://wappaygw.alipay.com/service/rest.htm', Argument::cetera())
             ->willReturn(new Response(200, [], file_get_contents(__DIR__ . '/data/wap_authorize_token_success.txt')));
 
         $result = $this->prepareTrade('201304101204101002', 0.01)->getWrappedObject();
@@ -40,9 +40,9 @@ class WapServiceSpec extends ObjectBehavior
         assert_not_empty($result->formAction);
     }
 
-    function its_authorization_can_fail_when_preparing_trade(ClientInterface $httpClient)
+    function its_authorization_can_fail_when_preparing_trade(ClientInterface $client)
     {
-        $httpClient->request('POST', 'http://wappaygw.alipay.com/service/rest.htm', Argument::cetera())
+        $client->request('POST', 'http://wappaygw.alipay.com/service/rest.htm', Argument::cetera())
             ->willReturn(new Response(200, [], file_get_contents(__DIR__ . '/data/wap_authorize_token_failed.txt')));
 
         $this->shouldThrow(new \Exception('合作伙伴没有开通接口访问权限'))
@@ -52,7 +52,7 @@ class WapServiceSpec extends ObjectBehavior
     //================================
     //        tradePaid
     //================================
-    function it_will_receive_sync_notification(ClientInterface $httpClient)
+    function it_will_receive_sync_notification()
     {
         parse_str(file_get_contents(__DIR__.'/data/wap_payment_success.txt'), $notification);
 
@@ -66,7 +66,7 @@ class WapServiceSpec extends ObjectBehavior
     //================================
     //        tradeUpdated
     //================================
-    function it_receives_trade_updated_async(ClientInterface $httpClient)
+    function it_receives_trade_updated_async()
     {
         parse_str(file_get_contents(__DIR__.'/data/wap_trade_updated.txt'), $notification);
 
