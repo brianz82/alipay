@@ -65,7 +65,7 @@ abstract class AbstractService
      * Http client
      * @var \GuzzleHttp\ClientInterface
      */
-    protected $httpClient;
+    protected $client;
 
     /**
      * @param array $config     configuration.
@@ -74,13 +74,13 @@ abstract class AbstractService
      *                          - cert_file           partner's private key(points to a file in .pem format)
      *                          - ali_cert_file       alipay's public key (points to a file in .pem format)
      *                          - seller              seller's id/account on alipay, e.g., mail/mobile
-     *                          - payment_notify_url  asynchronous notification url on trade payment
+     *                          - notify_url          asynchronous notification url on trade payment
      *                          - refund_notify_url   asynchronous notification url on trade refund
      *                          - secure_key          the secure key (安全校验码) going with the seller
      *                                            
-     * @param ClientInterface $httpClient
+     * @param ClientInterface $client
      */
-    public function __construct(array $config, ClientInterface $httpClient = null)
+    public function __construct(array $config, ClientInterface $client = null)
     {
         $this->partner          = array_get($config, 'partner');
         $this->certFile         = array_get($config, 'cert_file');
@@ -90,45 +90,50 @@ abstract class AbstractService
         // but it's better to distinguish them
         $this->seller           = array_get($config, 'seller', $this->partner);
 
-        $this->notifyUrl        = array_get($config, 'payment_notify_url');
+        $this->notifyUrl        = array_get($config, 'notify_url');
         $this->refundNotifyUrl  = array_get($config, 'refund_notify_url');
         $this->secureKey        = array_get($config, 'secure_key');
         
-        $this->httpClient = $httpClient ?: $this->createDefaultHttpClient();
+        $this->client           = $client ?: $this->createDefaultHttpClient();
     }
-    
+
     /**
-     * Refund for a trade
+     * handle refund for multiple trades
      *
-     * @param string $tradeNo     the trade#
-     * @param float $fee          total amount of money to refund
-     * @param string $reason      reason
-     * @param array $options      options
-     *                            - sub           sub trade
-     *                                - fee
-     *                                - reason
-     *                            - profit
+     * @param array $trades       trades that need refunding. Each element in this array is also an array, whose
+     *                            elements should be like this: [ trade#, fee, reason, options ]. Refer to
+     *                            static::refundTrade() for more about those fields.
+     *
+     * @param array $options      (optional) additional options. accepted fields are:
+     *                            - seq_no  sequence# for this refund
      *
      * @return \stdClass          result of this refund. with following fields set:
      *                            - status 'REFUND_SUCCESS' for success,
      *                                     'REFUND_FAILED' for failure,
      *                                     'REFUND_PENDING' for pending(where an asynchronous notification will be sent)
-     *                            - msg    When status equals 'F', this field gives out the reason why it failed
+     *                            - msg    when status equals 'REFUND_FAILED', this field gives out
+     *                                     the reason why it failed
      *                            - seqNo  sequence# for this refund
      *
      * @throws \IllegalArgumentException
      */
-    public function refundTrade($tradeNo, $fee, $reason = '协商退款', array $options = [])
+    public function refundTrades(array $trades, array $options = [])
     {
-        if (($batchNum = array_get($options, 'batch_num', 1)) > 1000) {
+        if (!($refundTradeNo = array_get($options, 'seq_no'))) {
+            $refundTradeNo = $this->genRefundTradeNumber();
+        }
+
+        if (($batches = count($trades)) > 1000) {
             throw new \IllegalArgumentException('退款总笔数不能超过1000笔');
         }
 
-        if (!($batchNo = array_get($options, 'batch_no'))) {
-            $batchNo = $this->genRefundTradeSeqNo($tradeNo);
+        // detail data
+        $detail = '';
+        foreach ($trades as $trade) {
+            list($tradeNo, $fee, $reason, $opts) = $trade;
+            $detail .= $this->formatRefundTradeDetail($tradeNo, $fee, $reason, $opts) . '#';
         }
-
-        $detail = $this->formatRefundTradeDetail($tradeNo,  $fee, $reason, $options);
+        $detail = rtrim($detail, '#');
 
         // NOTE: the following $params are sorted manually (to save some CPU)
         //       If a new key needs adding, do not break this rule. Otherwise,
@@ -138,8 +143,8 @@ abstract class AbstractService
         //
         $params = [
             '_input_charset' => 'utf-8',
-            'batch_no'       => $batchNo,
-            'batch_num'      => $batchNum,
+            'batch_no'       => $refundTradeNo,
+            'batch_num'      => $batches,
             'detail_data'    => $detail,
             'notify_url'     => $this->refundNotifyUrl,
             'partner'        => $this->partner,
@@ -147,15 +152,54 @@ abstract class AbstractService
             'return_type'    => 'xml',
             'service'        => 'refund_fastpay_by_platform_nopwd',
         ];
-    
+
         $params['sign'] = $this->md5Sign(self::implode(array_filter($params)));
         $params['sign_type'] = 'MD5';
-    
+
         $result = $this->postRefundRequestAndParse($params);
-        $result->seqNo = $params['batch_no'];  // also append batch#, as it will be used on 
-                                               // asynchronous notification is received
-    
+        $result->seqNo = $params['batch_no'];  // also append batch#, as it will be used on
+        // asynchronous notification is received
+
         return $result;
+    }
+    
+    /**
+     * Refund for a trade
+     *
+     * @param string $tradeNo     the trade#
+     * @param float $fee          total amount of money to refund
+     * @param string $reason      reason
+     * @param array $options      options
+     *                            - sub    sub trade
+     *                                - fee        fee to refund for this sub trade
+     *                                - reason     reason why refunding this sub trade
+     *                            - profit       (array) for shared profit refund. each element in this array is
+     *                                           another array, and in turn each element complies with this format:
+     *                                           [ 转出人支付宝账号/原收到分润金额的账户,
+     *                                             转出人支付宝账号对应用户ID(2088开头16位纯数字),
+    //                                             转入人支付宝账号/原付出分润金额的账户,
+     *                                             转入人支付宝账号对应用户ID,
+    //                                             退款金额,
+     *                                             退款理由     --- optional, default to '协商退款'
+     *                                           ]
+     *                            - seq_no      sequence# for this refund
+     * @return \stdClass          result of this refund. with following fields set:
+     *                            - status 'REFUND_SUCCESS' for success,
+     *                                     'REFUND_FAILED' for failure,
+     *                                     'REFUND_PENDING' for pending(where an asynchronous notification will be sent)
+     *                            - msg    when status equals 'REFUND_FAILED', this field gives out
+     *                                     the reason why it failed
+     *                            - seqNo  sequence# for this refund
+     *
+     * @throws \IllegalArgumentException
+     */
+    public function refundTrade($tradeNo, $fee, $reason = '协商退款', array $options = [])
+    {
+        return $this->refundTrades([
+            [ $tradeNo, $fee, $reason, $options ]
+        ], array_filter([
+            'seq_no' => array_key_exists('seq_no', $options) ? $options['seq_no'] : null
+        ]));
     }
 
     private function formatRefundTradeDetail($tradeNo, $fee, $reason, array $options = [])
@@ -193,8 +237,8 @@ abstract class AbstractService
     {
         //
         // 分润退款数据格式: 转出人支付宝账号[原收到分润金额的账户]^转出人支付宝账号对应用户ID[2088开头16位纯数字]^
-        //                转入人支付宝账号[原付出分润金额的账户]^转入人支付宝账号对应用户ID^
-        //                退款金额^退款理由。
+        //                 转入人支付宝账号[原付出分润金额的账户]^转入人支付宝账号对应用户ID^
+        //                 退款金额^退款理由。
         if (count($profitRefund) == 5) { // reason is missing
             $profitRefund[] = $defaultReason;
         }
@@ -204,7 +248,7 @@ abstract class AbstractService
     
     private function postRefundRequestAndParse($params)
     {
-        $response = $this->httpClient->request('POST', self::REFUND_URL, [ RequestOptions::FORM_PARAMS => $params ]);
+        $response = $this->client->request('POST', self::REFUND_URL, [ RequestOptions::FORM_PARAMS => $params ]);
         if ($response->getStatusCode() != 200) {
             throw new \Exception('bad response from alipay: ' . (string)$response->getBody());
         }
@@ -238,14 +282,14 @@ abstract class AbstractService
     }
     
     // generate seq# for the refund trade
-    private function genRefundTradeSeqNo($tradeNo)
+    private function genRefundTradeNumber()
     {
         // constraint: 退款日期(8位当天日期)+流水号(3~24位, 不能接受“000”,但是可以接受英文字符)
         //
         // Our implementation:
         // - 14 chars     current date(8) and time (6)
         // - 13 chars     generate with uniqid()
-        // - 5  chars     random number between [1, 99999]. if not 5 in length, left pad with '0'
+        // -  5 chars     random number between [1, 99999]. if not 5 in length, left pad with '0'
         //
         return date('YmdHis') . uniqid() . str_pad(rand(1, 99999), 5, '0', STR_PAD_LEFT);
     }

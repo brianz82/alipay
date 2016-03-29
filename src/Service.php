@@ -4,15 +4,15 @@ namespace Homer\Payment\Alipay;
 class Service extends AbstractService
 {
     /**
-     * prepare for a pay
+     * prepare for a trade
      *
-     * @param string $orderNo      Order no, no more than 64 in length
-     * @param float $fee           Amount (in RMB) of money to be paid (range: [0.01, 10000000.00])
-     * @param string $subject      Name of product/service being paid, at most 128 characters
-     * @param string $description  Description of product/service being paid
-     * @param string $paymentType  Type of the payment. '1' for 商品购买
-     * @param string $expiry       Expire time (range: [1m, 15d], where 'for' miniute, 'h' for hour, 'd' for day, '1c' for the all day long(expire at 0:00AM))
-     * @param string $accessToken  Access token (returned by alipay, also called session key)
+     * @param string $orderNo      order no, no more than 64 in length
+     * @param float $fee           amount (in RMB) of money to be paid (range: [0.01, 10000000.00])
+     * @param string $subject      name of product/service being paid, at most 128 characters
+     * @param string $description  description of product/service being paid
+     * @param string $paymentType  type of the payment. '1' for 商品购买
+     * @param string $expiry       expire time (range: [1m, 15d], where 'for' miniute, 'h' for hour, 'd' for day, '1c' for the all day long(expire at 0:00AM))
+     * @param string $accessToken  access token (returned by alipay, also called session key)
      *
      * @return string              request with signature
      */

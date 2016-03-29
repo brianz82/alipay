@@ -59,11 +59,11 @@ class WapService extends AbstractService
      *                             - successUrl   On a successful payment, the web page will be redirect to
      *                             - abortUrl     User may abort the payment. If true, redirect to this url
      *                             - 
-     * @param ClientInterface $httpClient
+     * @param ClientInterface $client
      */
-    public function __construct(array $config, ClientInterface $httpClient = null)
+    public function __construct(array $config, ClientInterface $client = null)
     {
-        parent::__construct($config, $httpClient);
+        parent::__construct($config, $client);
         
         $this->successUrl = array_get($config, 'success_url');
         $this->abortUrl   = array_get($config, 'abort_url');
@@ -141,7 +141,7 @@ class WapService extends AbstractService
                         'v'               => '2.0');
     
         $params['sign'] = $this->signRequest(self::implode($params), $this->signType);
-        $response = $this->httpClient->request('POST', self::GATEWAY_URL, [ RequestOptions::FORM_PARAMS => $params ]);
+        $response = $this->client->request('POST', self::GATEWAY_URL, [ RequestOptions::FORM_PARAMS => $params ]);
         if ($response->getStatusCode() != 200) {
             throw new \Exception('alipay server error: ' . (string)$response->getBody());
         }

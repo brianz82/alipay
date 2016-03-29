@@ -15,7 +15,7 @@ class ServiceSpec extends ObjectBehavior
             'cert_file'          => __DIR__ . '/data/rsa_private_key.pem',
             'ali_cert_file'      => __DIR__ . '/data/alipay_cert.pem',
             'seller'             => 'alipay@homer.com',
-            'payment_notify_url' => 'http://localhost/trade.php',
+            'notify_url'         => 'http://localhost/trade.php',
             'refund_notify_url'  => 'http://localhost/refund.php',
             'secure_key'         => 'cwygc4fpvwevu45m2jnh43w54vir9eqw',
         ];
