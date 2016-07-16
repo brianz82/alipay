@@ -124,7 +124,8 @@ class Service extends AbstractService
         $trade->tradeNo      = $notification['trade_no'];
         $trade->fee          = $notification['total_fee'];
         $trade->creationTime = $notification['gmt_create'];
-        $trade->paymentTime  = $notification['gmt_payment'];
+        // for non payment notifications, 'gmt_payment' not exists in the response
+        $trade->paymentTime  = isset($notification['gmt_payment']) ? $notification['gmt_payment'] : null;
         $trade->notifyTime   = $notification['notify_time'];
     
         return $trade;
